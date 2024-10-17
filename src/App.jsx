@@ -10,15 +10,14 @@ const SmartSchedule = () => {
   });
   const [unfinishedTasks, setUnfinishedTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
 
-  
   const fetchSchedule = async () => {
     const api_url = import.meta.env.VITE_API_URL;
     try {
       const response = await fetch(`${api_url}/api/schedule`);
       const data = await response.json();
       console.log('Received schedule data:', data);
-      // Filter out "Other Work" from the schedule
       setSchedule(data.schedule.filter(item => item.activity !== 'Other Work'));
       setSyncStatus({
         email: data.emailSent,
@@ -34,8 +33,31 @@ const SmartSchedule = () => {
   useEffect(() => {
     fetchSchedule();
     const interval = setInterval(fetchSchedule, 30 * 60 * 1000);
-    return () => clearInterval(interval);
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('beforeinstallprompt', () => {});
+    };
   }, []);
+
+  const handleInstallClick = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User accepted the install prompt');
+        } else {
+          console.log('User dismissed the install prompt');
+        }
+        setDeferredPrompt(null);
+      });
+    }
+  };
 
   const getFixedCommitments = () => {
     const today = new Date();
@@ -66,7 +88,6 @@ const SmartSchedule = () => {
   const handleTaskCompletion = (completedTask, isCompleted) => {
     setUnfinishedTasks(prev => prev.filter(task => task.activity !== completedTask.activity));
     if (!isCompleted) {
-      // If marked as not complete, add it back to unfinished tasks
       setUnfinishedTasks(prev => [...prev, { ...completedTask, isNotComplete: true }]);
     }
   };
@@ -84,7 +105,7 @@ const SmartSchedule = () => {
       const data = await response.json();
       if (data.success) {
         console.log('Unfinished tasks updated successfully');
-        fetchSchedule(); // Refresh the schedule after updating
+        fetchSchedule();
       } else {
         console.error('Failed to update unfinished tasks');
       }
@@ -106,7 +127,7 @@ const SmartSchedule = () => {
       const data = await response.json();
       if (data.success) {
         console.log('Task updated successfully');
-        fetchSchedule(); // Refresh the schedule after updating
+        fetchSchedule();
       } else {
         console.error('Failed to update task');
       }
@@ -302,6 +323,15 @@ const SmartSchedule = () => {
           </div>
         </div>
       </div>
+      
+      {deferredPrompt && (
+        <button
+          onClick={handleInstallClick}
+          className="mt-4 w-full px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        >
+          Install App
+        </button>
+      )}
     </div>
   );
 };
