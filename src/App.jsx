@@ -11,6 +11,7 @@ const SmartSchedule = () => {
   const [unfinishedTasks, setUnfinishedTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
 
+  
   const fetchSchedule = async () => {
     const api_url = import.meta.env.VITE_API_URL;
     try {
