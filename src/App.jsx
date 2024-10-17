@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { Clock, Calendar, Mail, AlertCircle, CheckCircle, Plus } from 'lucide-react';
+import { Clock, Calendar, Mail, AlertCircle, CheckCircle, Plus, X } from 'lucide-react';
 
 const SmartSchedule = () => {
   const [schedule, setSchedule] = useState(null);
@@ -12,17 +12,19 @@ const SmartSchedule = () => {
   const [newTask, setNewTask] = useState('');
 
   const fetchSchedule = async () => {
+    const api_url = import.meta.env.VITE_API_URL;
     try {
-      const response = await fetch('http://localhost:3000/api/schedule');
+      const response = await fetch(`${api_url}/api/schedule`);
       const data = await response.json();
       console.log('Received schedule data:', data);
-      setSchedule(data.schedule);
+      // Filter out "Other Work" from the schedule
+      setSchedule(data.schedule.filter(item => item.activity !== 'Other Work'));
       setSyncStatus({
         email: data.emailSent,
         calendar: data.calendarUpdated
       });
       setLastUpdate(new Date(data.lastUpdate).toLocaleString());
-      setUnfinishedTasks(data.unfinishedTasks);
+      setUnfinishedTasks(data.unfinishedTasks.filter(task => task.activity !== 'Other Work'));
     } catch (error) {
       console.error('Failed to fetch schedule:', error);
     }
@@ -60,13 +62,18 @@ const SmartSchedule = () => {
     }
   };
 
-  const handleTaskCompletion = (completedTask) => {
+  const handleTaskCompletion = (completedTask, isCompleted) => {
     setUnfinishedTasks(prev => prev.filter(task => task.activity !== completedTask.activity));
+    if (!isCompleted) {
+      // If marked as not complete, add it back to unfinished tasks
+      setUnfinishedTasks(prev => [...prev, { ...completedTask, isNotComplete: true }]);
+    }
   };
 
   const updateUnfinishedTasks = async () => {
+    const api_url = import.meta.env.VITE_API_URL;
     try {
-      const response = await fetch('http://localhost:3000/api/update-unfinished', {
+      const response = await fetch(`${api_url}/api/update-unfinished`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -83,6 +90,35 @@ const SmartSchedule = () => {
     } catch (error) {
       console.error('Error updating unfinished tasks:', error);
     }
+  };
+
+  const handleTaskUpdate = async (task, isCompleted) => {
+    const api_url = import.meta.env.VITE_API_URL;
+    try {
+      const response = await fetch(`${api_url}/api/update-task`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ task, isCompleted }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        console.log('Task updated successfully');
+        fetchSchedule(); // Refresh the schedule after updating
+      } else {
+        console.error('Failed to update task');
+      }
+    } catch (error) {
+      console.error('Error updating task:', error);
+    }
+  };
+
+  const isTaskEnded = (endTime) => {
+    const now = new Date();
+    const [hours, minutes] = endTime.split(':').map(Number);
+    const taskEndTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
+    return now > taskEndTime;
   };
 
   const isWeekend = () => {
@@ -153,7 +189,25 @@ const SmartSchedule = () => {
                     <span className="font-medium">{item.activity}</span>
                     <span className="text-sm text-gray-500 ml-2">({item.duration}h)</span>
                   </div>
-                  <span className="text-gray-600">{item.start} - {item.end}</span>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-gray-600">{item.start} - {item.end}</span>
+                    {isTaskEnded(item.end) && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleTaskUpdate(item, true)}
+                          className="px-2 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                        >
+                          Complete
+                        </button>
+                        <button
+                          onClick={() => handleTaskUpdate(item, false)}
+                          className="px-2 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                        >
+                          Not Complete
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -170,12 +224,20 @@ const SmartSchedule = () => {
                     <span className="font-medium">{task.activity}</span>
                     <span className="text-sm text-gray-500 ml-2">({task.duration}h)</span>
                   </div>
-                  <button
-                    onClick={() => handleTaskCompletion(task)}
-                    className="px-2 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-                  >
-                    Complete
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleTaskCompletion(task, true)}
+                      className="px-2 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                    >
+                      Complete
+                    </button>
+                    <button
+                      onClick={() => handleTaskCompletion(task, false)}
+                      className="px-2 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                    >
+                      Not Complete
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
