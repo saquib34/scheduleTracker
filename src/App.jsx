@@ -59,7 +59,94 @@ const SmartSchedule = () => {
     }
   };
 
-  // ... (keep all other existing functions: getFixedCommitments, handleAddTask, handleTaskCompletion, updateUnfinishedTasks, handleTaskUpdate, isTaskEnded, isWeekend)
+  const getFixedCommitments = () => {
+    const today = new Date();
+    const day = today.getDay();
+    const isWeekend = day === 0 || day === 6;
+
+    const fixedCommitments = [
+      { start: '00:00', end: '05:00', activity: 'Sleep', duration: 5 },
+    ];
+
+    if (!isWeekend) {
+      fixedCommitments.push({ start: '07:30', end: '14:00', activity: 'College', duration: 6.5 });
+      if (day !== 0) { // Not Sunday
+        fixedCommitments.push({ start: '16:00', end: '19:00', activity: 'Dhobi G', duration: 3 });
+      }
+    }
+
+    return fixedCommitments;
+  };
+
+  const handleAddTask = () => {
+    if (newTask.trim()) {
+      setUnfinishedTasks(prev => [...prev, { activity: newTask, duration: 1 }]);
+      setNewTask('');
+    }
+  };
+
+  const handleTaskCompletion = (completedTask, isCompleted) => {
+    setUnfinishedTasks(prev => prev.filter(task => task.activity !== completedTask.activity));
+    if (!isCompleted) {
+      setUnfinishedTasks(prev => [...prev, { ...completedTask, isNotComplete: true }]);
+    }
+  };
+
+  const updateUnfinishedTasks = async () => {
+    const api_url = import.meta.env.VITE_API_URL;
+    try {
+      const response = await fetch(`${api_url}/api/update-unfinished`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ unfinishedTasks }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        console.log('Unfinished tasks updated successfully');
+        fetchSchedule();
+      } else {
+        console.error('Failed to update unfinished tasks');
+      }
+    } catch (error) {
+      console.error('Error updating unfinished tasks:', error);
+    }
+  };
+
+  const handleTaskUpdate = async (task, isCompleted) => {
+    const api_url = import.meta.env.VITE_API_URL;
+    try {
+      const response = await fetch(`${api_url}/api/update-task`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ task, isCompleted }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        console.log('Task updated successfully');
+        fetchSchedule();
+      } else {
+        console.error('Failed to update task');
+      }
+    } catch (error) {
+      console.error('Error updating task:', error);
+    }
+  };
+
+  const isTaskEnded = (endTime) => {
+    const now = new Date();
+    const [hours, minutes] = endTime.split(':').map(Number);
+    const taskEndTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
+    return now > taskEndTime;
+  };
+
+  const isWeekend = () => {
+    const today = new Date();
+    return today.getDay() === 0 || today.getDay() === 6;
+  };
 
   return (
     <div className="max-w-4xl mx-auto p-4">
