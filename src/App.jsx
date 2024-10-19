@@ -9,6 +9,7 @@ const SmartSchedule = () => {
     calendar: false
   });
   const [unfinishedTasks, setUnfinishedTasks] = useState([]);
+  const [waitingForConfirmation, setWaitingForConfirmation] = useState([]);
   const [newTask, setNewTask] = useState('');
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
@@ -18,13 +19,14 @@ const SmartSchedule = () => {
       const response = await fetch(`${api_url}/api/schedule`);
       const data = await response.json();
       console.log('Received schedule data:', data);
-      setSchedule(data.schedule.filter(item => item.activity !== 'Other Work'));
+      setSchedule(data.schedule.filter(item => item.activity !== 'Other Work' && !item.isFixed));
       setSyncStatus({
         email: data.emailSent,
         calendar: data.calendarUpdated
       });
       setLastUpdate(new Date(data.lastUpdate).toLocaleString());
       setUnfinishedTasks(data.unfinishedTasks.filter(task => task.activity !== 'Other Work'));
+      setWaitingForConfirmation(data.waitingForConfirmation || []);
     } catch (error) {
       console.error('Failed to fetch schedule:', error);
     }
@@ -65,13 +67,13 @@ const SmartSchedule = () => {
     const isWeekend = day === 0 || day === 6;
 
     const fixedCommitments = [
-      { start: '00:00', end: '05:00', activity: 'Sleep', duration: 5 },
+      { start: '00:00', end: '05:00', activity: 'Sleep', duration: 5, isFixed: true },
     ];
 
     if (!isWeekend) {
-      fixedCommitments.push({ start: '07:30', end: '14:00', activity: 'College', duration: 6.5 });
+      fixedCommitments.push({ start: '07:30', end: '14:00', activity: 'College', duration: 6.5, isFixed: true });
       if (day !== 0) { // Not Sunday
-        fixedCommitments.push({ start: '16:00', end: '19:00', activity: 'Dhobi G', duration: 3 });
+        fixedCommitments.push({ start: '16:00', end: '19:00', activity: 'Dhobi G', duration: 3, isFixed: true });
       }
     }
 
@@ -85,10 +87,47 @@ const SmartSchedule = () => {
     }
   };
 
-  const handleTaskCompletion = (completedTask, isCompleted) => {
-    setUnfinishedTasks(prev => prev.filter(task => task.activity !== completedTask.activity));
-    if (!isCompleted) {
-      setUnfinishedTasks(prev => [...prev, { ...completedTask, isNotComplete: true }]);
+  const handleTaskCompletion = async (task) => {
+    const api_url = import.meta.env.VITE_API_URL;
+    try {
+      const response = await fetch(`${api_url}/api/complete-task`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ task }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        console.log('Task completed successfully');
+        fetchSchedule();
+      } else {
+        console.error('Failed to complete task');
+      }
+    } catch (error) {
+      console.error('Error completing task:', error);
+    }
+  };
+
+  const handleTaskConfirmation = async (task, isCompleted) => {
+    const api_url = import.meta.env.VITE_API_URL;
+    try {
+      const response = await fetch(`${api_url}/api/confirm-task`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ task, isCompleted }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        console.log('Task confirmation successful');
+        fetchSchedule();
+      } else {
+        console.error('Failed to confirm task');
+      }
+    } catch (error) {
+      console.error('Error confirming task:', error);
     }
   };
 
@@ -114,26 +153,20 @@ const SmartSchedule = () => {
     }
   };
 
-  const handleTaskUpdate = async (task, isCompleted) => {
-    const api_url = import.meta.env.VITE_API_URL;
-    try {
-      const response = await fetch(`${api_url}/api/update-task`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ task, isCompleted }),
-      });
-      const data = await response.json();
-      if (data.success) {
-        console.log('Task updated successfully');
-        fetchSchedule();
-      } else {
-        console.error('Failed to update task');
-      }
-    } catch (error) {
-      console.error('Error updating task:', error);
-    }
+  const isTaskOngoing = (startTime, endTime) => {
+    const now = new Date();
+    const [startHours, startMinutes] = startTime.split(':').map(Number);
+    const [endHours, endMinutes] = endTime.split(':').map(Number);
+    const taskStartTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), startHours, startMinutes);
+    const taskEndTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), endHours, endMinutes);
+    return now >= taskStartTime && now < taskEndTime;
+  };
+
+  const isTaskUpcoming = (startTime) => {
+    const now = new Date();
+    const [hours, minutes] = startTime.split(':').map(Number);
+    const taskStartTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
+    return now < taskStartTime;
   };
 
   const isTaskEnded = (endTime) => {
@@ -219,29 +252,54 @@ const SmartSchedule = () => {
             <div className="space-y-3">
               {schedule && schedule.map((item, index) => (
                 <div key={index} 
-                     className="flex items-center justify-between bg-green-50 p-3 rounded-lg">
+                     className={`flex items-center justify-between p-3 rounded-lg ${
+                       isTaskOngoing(item.start, item.end) ? 'bg-yellow-50' :
+                       isTaskUpcoming(item.start) ? 'bg-blue-50' : 'bg-red-50'
+                     }`}>
                   <div className="flex items-center space-x-2">
                     <span className="font-medium">{item.activity}</span>
                     <span className="text-sm text-gray-500 ml-2">({item.duration}h)</span>
                   </div>
                   <div className="flex items-center space-x-2">
                     <span className="text-gray-600">{item.start} - {item.end}</span>
-                    {isTaskEnded(item.end) && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleTaskUpdate(item, true)}
-                          className="px-2 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-                        >
-                          Complete
-                        </button>
-                        <button
-                          onClick={() => handleTaskUpdate(item, false)}
-                          className="px-2 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                        >
-                          Not Complete
-                        </button>
-                      </div>
+                    {isTaskEnded(item.end) && !item.isFixed && (
+                      <button
+                        onClick={() => handleTaskCompletion(item)}
+                        className="px-2 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                      >
+                        Complete
+                      </button>
                     )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Waiting for Confirmation */}
+          <div className="mt-6">
+            <h3 className="text-lg font-semibold mb-3">Waiting for Confirmation</h3>
+            <div className="space-y-3">
+              {waitingForConfirmation.map((task, index) => (
+                <div key={index} 
+                     className="flex items-center justify-between bg-orange-50 p-3 rounded-lg">
+                  <div>
+                    <span className="font-medium">{task.activity}</span>
+                    <span className="text-sm text-gray-500 ml-2">({task.duration}h)</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleTaskConfirmation(task, true)}
+                      className="px-2 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                    >
+                      Completed
+                    </button>
+                    <button
+                      onClick={() => handleTaskConfirmation(task, false)}
+                      className="px-2 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                    >
+                      Not Completed
+                    </button>
                   </div>
                 </div>
               ))}
@@ -254,25 +312,17 @@ const SmartSchedule = () => {
             <div className="space-y-3">
               {unfinishedTasks.map((task, index) => (
                 <div key={index} 
-                     className="flex items-center justify-between bg-yellow-50 p-3 rounded-lg">
+                     className="flex items-center justify-between bg-red-50 p-3 rounded-lg">
                   <div>
                     <span className="font-medium">{task.activity}</span>
                     <span className="text-sm text-gray-500 ml-2">({task.duration}h)</span>
                   </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleTaskCompletion(task, true)}
-                      className="px-2 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
-                    >
-                      Complete
-                    </button>
-                    <button
-                      onClick={() => handleTaskCompletion(task, false)}
-                      className="px-2 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                    >
-                      Not Complete
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => handleTaskCompletion(task)}
+                    className="px-2 py-1 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                  >
+                    Complete
+                  </button>
                 </div>
               ))}
             </div>
@@ -294,8 +344,8 @@ const SmartSchedule = () => {
             </div>
           </div>
 
-          {/* Update Button */}
-          <div className="mt-6">
+         {/* Update Button */}
+         <div className="mt-6">
             <button
               onClick={updateUnfinishedTasks}
               className="w-full px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
@@ -319,10 +369,16 @@ const SmartSchedule = () => {
                   <div
                     key={index}
                     className={`absolute h-full ${
-                      item.activity === 'Sleep' ? 'bg-blue-300' :
-                      item.activity === 'College' ? 'bg-yellow-300' :
-                      item.activity === 'Dhobi G' ? 'bg-purple-300' :
-                      'bg-green-300'
+                      item.isFixed ? (
+                        item.activity === 'Sleep' ? 'bg-blue-300' :
+                        item.activity === 'College' ? 'bg-yellow-300' :
+                        item.activity === 'Dhobi G' ? 'bg-purple-300' :
+                        'bg-gray-300'
+                      ) : (
+                        isTaskOngoing(item.start, item.end) ? 'bg-yellow-300' :
+                        isTaskUpcoming(item.start) ? 'bg-blue-300' :
+                        'bg-red-300'
+                      )
                     } rounded-full`}
                     style={{
                       left: `${startPercent}%`,
